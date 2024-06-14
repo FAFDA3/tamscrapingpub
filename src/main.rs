@@ -60,9 +60,9 @@ async fn fetch_html(url: &str) -> Result<String, Error> {
 }
 
 
-fn extract_json (html: &str)->Option<String>{
+fn extract_json (html_content: &str)->Option<String>{
     let re = Regex::new(r#"data-deferred-state-0="true" type="application/json">([^<]+)</script></body></html>"#).unwrap();
-    re.captures(html).and_then(|cap| cap.get(1)).map(|m| m.as_str().to_string())
+    re.captures(html_content).and_then(|cap| cap.get(1)).map(|m| m.as_str().to_string())
 
 
 
@@ -78,8 +78,8 @@ fn save_html(content: &str, folder: &str, filename: &str) -> std::io::Result<()>
     Ok(())
 }
 
-fn extract_data(html: &str) -> String {
-    html.to_string()
+fn extract_data(html_content: &str) -> String {
+    html_content.to_string()
 }
 
 
@@ -97,7 +97,7 @@ fn use_json(path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync
 
 
 
-
+/*
 
 async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: web::Data<AppState>) {
     loop {
@@ -140,7 +140,55 @@ async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: we
         sleep(Duration::from_secs(1800)).await;
     }
 }
+*/
 
+async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: web::Data<AppState>) {
+    loop {
+        let url = create_airbnb_url(lat1, lat2, long1, long2);
+        println!("URL created: {}", url);
+
+        match fetch_html(&url).await {
+            Ok(html_content) => {
+                let data = extract_data(&html_content);
+
+                {
+                    let mut html_lock = app_state.html.lock().unwrap();
+                    *html_lock = Ok(data.clone());
+                }
+
+                if let Err(e) = save_html(&data, "HTML", "test20240608.html") {
+                    eprintln!("Error saving HTML: {}", e);
+                } else {
+                    println!("HTML saved successfully.");
+                }
+
+                if let Some(json_content) = extract_json(&html_content) {
+                    if let Err(e) = save_html(&json_content, "HTML", "extracted_data.json") {
+                        eprintln!("Error saving JSON: {}", e);
+                    } else {
+                        println!("JSON saved successfully.");
+
+                        match use_json("HTML/extracted_data.json") {
+                            Ok(parsed_json) => {
+                                let mut listings_lock = app_state.listings.lock().unwrap();
+                                *listings_lock = extract_listings(&parsed_json);
+                                println!("Extracted listings successfully.");
+                            }
+                            Err(e) => {
+                                eprintln!("Error parsing JSON: {}", e);
+                            }
+                        }
+                    }
+                } else {
+                    println!("No JSON content found.");
+                }
+            }
+            Err(e) => eprintln!("Error fetching HTML: {}", e),
+        }
+
+        sleep(Duration::from_secs(1800)).await;
+    }
+}
 
 
 
@@ -168,8 +216,20 @@ async fn listings(data: web::Data<AppState>) -> impl Responder {
     }
 }
 
+#[get("/html")]
+async fn html(data: web::Data<AppState>) -> impl Responder {
+    let html = data.html.lock().unwrap();
+    match &*html {
+        Ok(html) => HttpResponse::Ok().body(html.clone()),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Error: {}", e)),
+    }
+}
+
+
+
 struct AppState {
     listings: Mutex<Result<Vec<Value>, Box<dyn std::error::Error + Send + Sync>>>,
+    html: Mutex<Result<String, Box<dyn std::error::Error + Send + Sync>>>,
 }
 
 
@@ -188,7 +248,9 @@ async fn main() -> std::io::Result<()>{
 
     let app_state = web::Data::new(AppState{
         listings: Mutex :: new(Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No data yet")))),
-        });
+        html: Mutex::new(Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No data yet")))),
+    
+    });
 
     let app_state_clone = app_state.clone();
     
@@ -197,7 +259,8 @@ async fn main() -> std::io::Result<()>{
     let server = HttpServer::new(move ||{
         App::new()
             .app_data(app_state.clone())
-            .service(listings)   
+            .service(listings)
+            .service(html)   
     
     })
     .bind(("0.0.0.0", port.parse().unwrap()))?
@@ -294,8 +357,8 @@ fn get_input(prompt: &str) -> String {
 }
 
 
-fn extract_contextual_content(html: &str) -> String{
-    let document = Html::parse_document(html);
+fn extract_contextual_content(html_content: &str) -> String{
+    let document = Html::parse_document(html_content);
     let selector = Selector::parse("[contextualPicturesPageInfo]").unwrap();
     document.select(&selector)
         .map(|element| element.html())
