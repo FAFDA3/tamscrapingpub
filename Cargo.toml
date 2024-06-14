@@ -7,7 +7,7 @@ edition = "2021"
 reqwest = {version = "0.11" ,  features = ["json"]}
 scraper = "0.12"
 mysql_async = "0.25"
-tokio = {vesion = "1", features = ["full"]}
+tokio = {version = "1", features = ["full"]}
 
 flate2 = "1.0"
 regex = "1"
