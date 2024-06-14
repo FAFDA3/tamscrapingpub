@@ -7,6 +7,7 @@ use std::path::Path;
 use flate2::read::GzDecoder;
 use std::io::{self, Read, Write};
 use std::sync::Mutex;
+use std::env;
 use regex:: Regex;
 use serde_json::{Value, Result as Resultserde};
 use actix_web::{Responder, web, get, HttpResponse, HttpServer, App};
@@ -81,26 +82,6 @@ fn extract_data(html: &str) -> String {
     html.to_string()
 }
 
-/*async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64) {
-    loop {
-        let url = create_airbnb_url(lat1, lat2, long1, long2);
-        println!("URL created: {}", url);
-        match fetch_html(&url).await {
-            Ok(html) => {
-                let data = extract_data(&html);
-                if let Err(e) = save_html(&data, "HTML", "test.html") {
-                    eprintln!("Error saving HTML: {}", e);
-                } else {
-                    println!("HTML saved successfully.");
-                }
-            }
-            Err(e) => eprintln!("Error fetching HTML: {}", e),
-        }
-        println!("scarper end");
-        sleep(Duration::from_secs(1800)).await;
-    }
-}*/
-
 
 
 fn use_json(path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
@@ -112,15 +93,6 @@ fn use_json(path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync
 
 
 
-
-
-
-
-/*fn use_json(path: &str) -> Result<Value, Box<dyn std::error::Error>> {
-    let json_str = fs::read_to_string(path)?;
-    let parsed_json: Value = serde_json::from_str(&json_str)?;
-    Ok(parsed_json)
-}*/
 
 
 
@@ -186,16 +158,6 @@ fn extract_listings(json: &Value) -> Result<Vec<Value>, Box<dyn std::error::Erro
 
 
 
-/*
-
-fn extract_listings(json: &Value) -> Result<Vec<Value>, Box<dyn std::error::Error>> {
-    let listings_array = json["niobeMinimalClientData"][0][1]["data"]["presentation"]["staysSearch"]["results"]["searchResults"]
-        .as_array()
-        .ok_or("Failed to find listings")?
-        .clone();
-
-    Ok(listings_array)
-}*/
 
 #[get("/listings")]
 async fn listings(data: web::Data<AppState>) -> impl Responder {
@@ -229,13 +191,16 @@ async fn main() -> std::io::Result<()>{
         });
 
     let app_state_clone = app_state.clone();
+    
+    let port = env::var("PORT").unwrap_or_else(|_| "8000".to_string());
+
     let server = HttpServer::new(move ||{
         App::new()
             .app_data(app_state.clone())
             .service(listings)   
     
     })
-    .bind("127.0.0.1:8000")?
+    .bind(("0.0.0.0", port.parse().unwrap()))?
     .run();
 
     tokio::spawn(run_scraper(lat1,lat2,long1,long2, app_state_clone));
