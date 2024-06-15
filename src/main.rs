@@ -12,11 +12,21 @@ use regex:: Regex;
 use serde_json::{Value, Result as Resultserde};
 use actix_web::{Responder, web, get, HttpResponse, HttpServer, App};
 
-fn create_airbnb_url(latitude1: f64, latitude2: f64, longitude1: f64, longitude2: f64) -> String {
-    format!("https://it.airbnb.com/s/homes?refinement_paths%5B%5D=%2Fhomes&place_id=ChIJu46S-ZZhLxMROG5lkwZ3D7k&checkin=2024-07-19&checkout=2024-07-31&adults=1&tab_id=home_tab&query=Rome%2C+Italie&flexible_trip_lengths%5B%5D=one_week&monthly_start_date=2024-07-01&monthly_length=3&monthly_end_date=2024-10-01&search_mode=regular_search&price_filter_input_type=0&price_filter_num_nights=12&channel=EXPLORE&ne_lat={}&ne_lng={}&sw_lat={}&sw_lng={}&zoom=12.930721908719006&zoom_level=12.930721908719006&search_by_map=true&search_type=user_map_move", latitude1, longitude1, latitude2, longitude2)
+fn create_airbnb_url( checkin: &str, checkout: &str, adults: u64, children: u64, infants:u64, latitude1: f64, latitude2: f64, longitude1: f64, longitude2: f64, cursor: &str) -> String {
+    format!("https://it.airbnb.com/s/homes?refinement_paths%5B%5D=%2Fhomes&place_id=ChIJu46S-ZZhLxMROG5lkwZ3D7k&checkin={}&checkout={}&adults={}&children={}&infants={}&tab_id=home_tab&query=Rome%2C+Italie&flexible_trip_lengths%5B%5D=one_week&monthly_start_date=2024-05-01&monthly_length=3&monthly_end_date=2029-10-01&search_mode=regular_search&price_filter_input_type=0&price_filter_num_nights=12&channel=EXPLORE&ne_lat={}&ne_lng={}&sw_lat={}&sw_lng={}&zoom=12.930721908719006&zoom_level=12.930721908719006&search_by_map=true&search_type=user_map_move&cursor={}", checkin, checkout, adults, children, infants, latitude1, longitude1, latitude2, longitude2, cursor)
 }
 
+/*  cursor list:
+yJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjowLCJ2ZXJzaW9uIjoxfQ%3D%3D
+eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjoxOCwidmVyc2lvbiI6MX0%3D
+eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjozNiwidmVyc2lvbiI6MX0%3D
+eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0Ijo1NCwidmVyc2lvbiI6MX0%3D
+eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0Ijo3MiwidmVyc2lvbiI6MX0%3D
+eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0Ijo5MCwidmVyc2lvbiI6MX0%3D
+eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjEwOCwidmVyc2lvbiI6MX0%3D
+eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjEyNiwidmVyc2lvbiI6MX0%3D
 
+*/
 async fn fetch_html(url: &str) -> Result<String, Error> {
     let client = reqwest::Client::new();
 
@@ -93,58 +103,9 @@ fn use_json(path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync
 
 
 
-
-
-
-
-/*
-
-async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: web::Data<AppState>) {
+async fn run_scraper(checkin: &str, checkout: &str, adults: u64, children: u64, infants: u64,  lat1: f64, lat2: f64, long1: f64, long2: f64, cursor: &str, app_state: web::Data<AppState>) {
     loop {
-        let url = create_airbnb_url(lat1, lat2, long1, long2);
-        println!("URL created: {}", url);
-
-        match fetch_html(&url).await {
-            Ok(html) => {
-                let data = extract_data(&html);
-                if let Err(e) = save_html(&data, "HTML", "test20240608.html") {
-                    eprintln!("Error saving HTML: {}", e);
-                } else {
-                    println!("HTML saved successfully.");
-                }
-
-                if let Some(json_content) = extract_json(&html) {
-                    if let Err(e) = save_html(&json_content, "HTML", "extracted_data.json") {
-                        eprintln!("Error saving JSON: {}", e);
-                    } else {
-                        println!("JSON saved successfully.");
-
-                        match use_json("HTML/extracted_data.json") {
-                            Ok(parsed_json) => {
-                                let mut listings_lock = app_state.listings.lock().unwrap();
-                                *listings_lock = extract_listings(&parsed_json);
-                                println!("Extracted listings successfully.");
-                            }
-                            Err(e) => {
-                                eprintln!("Error parsing JSON: {}", e);
-                            }
-                        }
-                    }
-                } else {
-                    println!("No JSON content found.");
-                }
-            }
-            Err(e) => eprintln!("Error fetching HTML: {}", e),
-        }
-
-        sleep(Duration::from_secs(1800)).await;
-    }
-}
-*/
-
-async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: web::Data<AppState>) {
-    loop {
-        let url = create_airbnb_url(lat1, lat2, long1, long2);
+        let url = create_airbnb_url(checkin, checkout, adults, children, infants, lat1, lat2, long1, long2, cursor);
         println!("URL created: {} here the html", url);
 
         match fetch_html(&url).await {
@@ -159,7 +120,7 @@ async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: we
                 if let Err(e) = save_html(&data, "HTML", "test20240608.html") {
                     eprintln!("Error saving HTML: {}", e);
                 } else {
-                    println!("HTML saved successfully. {} here the html", &data);
+                    println!("HTML saved successfully.");
                 }
 
                 if let Some(json_content) = extract_json(&html_content) {
@@ -239,12 +200,20 @@ async fn main() -> std::io::Result<()>{
 
     println!("start the scraping");
 
+    let checkin_: &str = "2024-08-01";
+    let checkout_: &str = "2024-08-20";
+    
+    let adults_ : u64 = 1;
+    let children_: u64 = 0;
+    let infants_: u64 = 0;
      
     let lat1: f64 = 43.947613;
     let lat2: f64 = 43.8520324685;
 
     let long1: f64 = 12.5242224779;
     let long2: f64 = 12.412739371;
+
+    let cursor_: &str = "eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjoxOCwidmVyc2lvbiI6MX0%3D";
 
     let app_state = web::Data::new(AppState{
         listings: Mutex :: new(Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No data yet")))),
@@ -266,85 +235,13 @@ async fn main() -> std::io::Result<()>{
     .bind(("0.0.0.0", port.parse().unwrap()))?
     .run();
 
-    tokio::spawn(run_scraper(lat1,lat2,long1,long2, app_state_clone));
+    tokio::spawn(run_scraper(checkin_, checkout_ , adults_, children_, infants_ , lat1,lat2,long1,long2,cursor_, app_state_clone));
 
     server.await
 }
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/*
-fn main() {
-    println!("Start the scraping");
-    /*let lat1 = get_input("Enter latitude1: ");
-    let long1 = get_input("Enter longitude1: ");
-    let lat2 = get_input("Enter latitude2: ");
-    let long2 = get_input("Enter longitude2: ");
-
-    let lat1: f64 = lat1.trim().parse().expect("Invalid input for latitude1");
-    let long1: f64 = long1.trim().parse().expect("Invalid input for longitude1");
-    let lat2: f64 = lat2.trim().parse().expect("Invalid input for latitude2");
-    let long2: f64 = long2.trim().parse().expect("Invalid input for longitude2");*/
-
-    
-    let lat1: f64 = 43.947613;
-    let lat2: f64 = 43.8520324685;
-
-    let long1: f64 = 12.5242224779;
-    let long2: f64 = 12.412739371;
-
-    let mydata: Result<Value, Box<dyn std::error::Error>> = use_json("HTML/extracted_data.json");
-
-    // match use_json("HTML/extracted_data.json"){
-
-
-    match &mydata{
-
-        Ok(parsed_json)=>{
-            println!("Parsed JSON: \n{}", serde_json::to_string_pretty(&parsed_json).unwrap());
-        }
-        Err(e)=>{
-            println!("there is an error {}", e);
-
-
-        }
-
-
-
-    }
-    // mydata : Resultserde<()> = use_json("HTML/extracted_data.json");
-
-
-    
-
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        run_scraper(lat1, lat2, long1, long2).await;
-    });
-
-    println!("finished");
-
-}
-*/
 
 
 fn get_input(prompt: &str) -> String {
