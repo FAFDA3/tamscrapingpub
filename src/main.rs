@@ -145,7 +145,7 @@ async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: we
 async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: web::Data<AppState>) {
     loop {
         let url = create_airbnb_url(lat1, lat2, long1, long2);
-        println!("URL created: {}", url);
+        println!("URL created: {} here the html", url);
 
         match fetch_html(&url).await {
             Ok(html_content) => {
