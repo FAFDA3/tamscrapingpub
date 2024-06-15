@@ -159,7 +159,7 @@ async fn run_scraper(lat1: f64, lat2: f64, long1: f64, long2: f64, app_state: we
                 if let Err(e) = save_html(&data, "HTML", "test20240608.html") {
                     eprintln!("Error saving HTML: {}", e);
                 } else {
-                    println!("HTML saved successfully.");
+                    println!("HTML saved successfully. {}", &data);
                 }
 
                 if let Some(json_content) = extract_json(&html_content) {
