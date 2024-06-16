@@ -2,6 +2,7 @@ use reqwest::{Error, header::{HeaderMap, HeaderValue, USER_AGENT, ACCEPT, REFERE
 use scraper::{Html, Selector};
 use tokio::time::{sleep, Duration};
 use tokio;
+use tokio:: sync:: oneshot;
 use std::fs;
 use std::path::Path;
 use flate2::read::GzDecoder;
@@ -9,10 +10,11 @@ use std::io::{self, Read, Write};
 use std::sync::Mutex;
 use std::env;
 use regex:: Regex;
+use serde:: {Deserialize, Serialize};
 use serde_json::{Value, Result as Resultserde};
 use actix_web::{Responder, web, get, HttpResponse, HttpServer, App};
 
-fn create_airbnb_url( checkin: &str, checkout: &str, adults: u64, children: u64, infants:u64, latitude1: f64, latitude2: f64, longitude1: f64, longitude2: f64, cursor: &str) -> String {
+fn create_airbnb_url( checkin: String, checkout:String, adults: u64, children: u64, infants:u64, latitude1: f64, latitude2: f64, longitude1: f64, longitude2: f64, cursor: String) -> String {
     format!("https://it.airbnb.com/s/homes?refinement_paths%5B%5D=%2Fhomes&place_id=ChIJu46S-ZZhLxMROG5lkwZ3D7k&checkin={}&checkout={}&adults={}&children={}&infants={}&tab_id=home_tab&query=Rome%2C+Italie&flexible_trip_lengths%5B%5D=one_week&monthly_start_date=2024-05-01&monthly_length=3&monthly_end_date=2029-10-01&search_mode=regular_search&price_filter_input_type=0&price_filter_num_nights=12&channel=EXPLORE&ne_lat={}&ne_lng={}&sw_lat={}&sw_lng={}&zoom=12.930721908719006&zoom_level=12.930721908719006&search_by_map=true&search_type=user_map_move&cursor={}", checkin, checkout, adults, children, infants, latitude1, longitude1, latitude2, longitude2, cursor)
 }
 
@@ -102,10 +104,10 @@ fn use_json(path: &str) -> Result<Value, Box<dyn std::error::Error + Send + Sync
 
 
 
-
-async fn run_scraper(checkin: &str, checkout: &str, adults: u64, children: u64, infants: u64,  lat1: f64, lat2: f64, long1: f64, long2: f64, cursor: &str, app_state: web::Data<AppState>) {
+/*
+async fn run_scraper(checkin: String, checkout: String, adults: u64, children: u64, infants: u64,  lat1: f64, lat2: f64, long1: f64, long2: f64, cursor: String, app_state: web::Data<AppState>) {
     loop {
-        let url = create_airbnb_url(checkin, checkout, adults, children, infants, lat1, lat2, long1, long2, cursor);
+        let url = create_airbnb_url(checkin.clone(), checkout.clone(), adults, children, infants, lat1, lat2, long1, long2, cursor.clone());
         println!("URL created: {} here the html", url);
 
         match fetch_html(&url).await {
@@ -149,7 +151,7 @@ async fn run_scraper(checkin: &str, checkout: &str, adults: u64, children: u64, 
 
         sleep(Duration::from_secs(1800)).await;
     }
-}
+}*/
 
 
 
@@ -162,6 +164,54 @@ fn extract_listings(json: &Value) -> Result<Vec<Value>, Box<dyn std::error::Erro
         .clone();
 
     Ok(listings_array)
+}
+
+async fn run_scraper(checkin: String, checkout: String, adults: u64, children: u64, infants: u64,  lat1: f64, lat2: f64, long1: f64, long2: f64, cursor: String, app_state: web::Data<AppState>, tx: oneshot::Sender<()>) {
+    let url = create_airbnb_url(checkin.clone(), checkout.clone(), adults, children, infants, lat1, lat2, long1, long2, cursor.clone());
+    println!("URL created: {} here the html", url);
+
+    match fetch_html(&url).await {
+        Ok(html_content) => {
+            let data = extract_data(&html_content);
+
+            {
+                let mut html_lock = app_state.html.lock().unwrap();
+                *html_lock = Ok(data.clone());
+            }
+
+            if let Err(e) = save_html(&data, "HTML", "test20240608.html") {
+                eprintln!("Error saving HTML: {}", e);
+            } else {
+                println!("HTML saved successfully.");
+            }
+
+            if let Some(json_content) = extract_json(&html_content) {
+                if let Err(e) = save_html(&json_content, "HTML", "extracted_data.json") {
+                    eprintln!("Error saving JSON: {}", e);
+                } else {
+                    println!("JSON saved successfully.");
+
+                    match use_json("HTML/extracted_data.json") {
+                        Ok(parsed_json) => {
+                            let mut listings_lock = app_state.listings.lock().unwrap();
+                            *listings_lock = extract_listings(&parsed_json);
+                            println!("Extracted listings successfully.");
+                        }
+                        Err(e) => {
+                            eprintln!("Error parsing JSON: {}", e);
+                        }
+                    }
+                }
+            } else {
+                println!("No JSON content found.");
+            }
+        }
+        Err(e) => eprintln!("Error fetching HTML: {}", e),
+    }
+
+    let _ = tx.send(());
+
+    sleep(Duration::from_secs(1800)).await;
 }
 
 
@@ -194,9 +244,85 @@ struct AppState {
 }
 
 
+#[get("/start_scraper")]
+async fn start_scraper(
+    query: web::Query<StartScraperParams>,
+    data: web::Data<AppState>,
+) -> impl Responder {
+    let params = query.into_inner();
+    let app_state_clone = data.clone();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(run_scraper(
+        params.checkin,
+        params.checkout,
+        params.adults,
+        params.children,
+        params.infants,
+        params.lat1,
+        params.lat2,
+        params.long1,
+        params.long2,
+        params.cursor,
+        app_state_clone,
+        tx,
+    ));
+
+    // Wait for the scraper to finish its first run
+    rx.await.unwrap();
+
+    // Return the listings
+    let listings_lock = data.listings.lock().unwrap();
+    match &*listings_lock {
+        Ok(listings_lock) => HttpResponse::Ok().json(listings_lock),
+        Err(e) => HttpResponse::InternalServerError().body(format!("Error: {}", e)),
+    }
+}
+
+#[derive(Deserialize)]
+struct StartScraperParams {
+    checkin: String,
+    checkout: String,
+    adults: u64,
+    children: u64,
+    infants: u64,
+    lat1: f64,
+    lat2: f64,
+    long1: f64,
+    long2: f64,
+    cursor: String,
+}
+
+
 #[actix_web::main]
 
-async fn main() -> std::io::Result<()>{
+async fn main() -> std::io::Result<()> {
+    println!("start the scraping");
+
+    let app_state = web::Data::new(AppState {
+        listings: Mutex::new(Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No data yet")))),
+        html: Mutex::new(Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No data yet")))),
+    });
+
+    let port = env::var("PORT").unwrap_or_else(|_| "8000".to_string());
+
+    let server = HttpServer::new(move || {
+        App::new()
+            .app_data(app_state.clone())
+            .service(listings)
+            .service(html)
+            .service(start_scraper)
+    })
+    .bind(("0.0.0.0", port.parse().unwrap()))?
+    .run();
+
+    server.await
+}
+
+
+
+
+/*async fn main() -> std::io::Result<()>{
 
     println!("start the scraping");
 
@@ -213,7 +339,7 @@ async fn main() -> std::io::Result<()>{
     let long1: f64 = 12.5242224779;
     let long2: f64 = 12.412739371;
 
-    let cursor_: &str = "eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjoxOCwidmVyc2lvbiI6MX0%3D";
+    let cursor_: &str = "eyJzZWN0aW9uX29mZnNldCI6MCwiaXRlbXNfb2Zmc2V0IjoxOCwidmVyc2lvbiI6MX0%3Dgo";
 
     let app_state = web::Data::new(AppState{
         listings: Mutex :: new(Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No data yet")))),
@@ -238,7 +364,7 @@ async fn main() -> std::io::Result<()>{
     tokio::spawn(run_scraper(checkin_, checkout_ , adults_, children_, infants_ , lat1,lat2,long1,long2,cursor_, app_state_clone));
 
     server.await
-}
+}*/
 
 
 
